@@ -25,7 +25,6 @@ library(here)
 library(readr)
 library(ggplot2)
 library(s2)
-
 sf_use_s2(T)
 ```
 
@@ -107,9 +106,9 @@ ta_errors <- ta[c(162, 224), ]
 
 # creates a buffer around the lakes as a mask to clip two 'outlier' features from the Traditional Authorities
 lake_clip <- lakes %>%
-  st_transform(3395) %>%
+  st_transform(3395) %>% # UTM
   st_buffer(625) %>%
-  st_transform(4326)
+  st_transform(4326) # WGS
 
 ta_errors <- st_difference(ta_errors, lake_clip) %>%
   st_cast ("POLYGON", warn=FALSE)

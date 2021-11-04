@@ -98,9 +98,9 @@ dhsclusters_2010 = readRDS(here(private_r, "datasets", "MWGE62FL.rds")) %>%
   st_transform(3395) %>% 
   # joining id for traditional authorities and livelihood zones to dhs clusters
   st_join(st_transform(select(ta_gref, ID_2),3395)) %>% 
-  st_join(st_transform(select(lhz_v, FNID),3395)) %>% 
+  #st_join(st_transform(select(lhz_v, FNID),3395)) %>% 
   rename(ta_id = ID_2,
-         lhz_id = FNID,
+         #lhz_id = FNID,
          urban_rural = URBAN_RURA)
 
 dhshh_2010 = readRDS(here(private_r, "datasets", "MWHR61SV.rds")) %>% zap_labels()
@@ -168,7 +168,8 @@ hh_capacity_t = dhshh_2010 %>%
   # and calulate something for each one
   rowwise %>%
   mutate(hhlivestock = sum(HV246A, HV246D, HV246E, HV246G, na.rm = T)) %>%
-  ungroup %>%
+  # when using aggregate functions, rowwise()c create a group for every row, must ungroup now
+  ungroup %>% 
   # using percent_rank(), those  
   # in cases where desc() is used, having a greater value before ranked makes a household more vulnerable 
   mutate(
@@ -317,9 +318,11 @@ b = st_bbox(
   st_as_sfc()
 
 # where raster = 1, you have flood visualized
-blank = st_as_stars(st_bbox(b), dx = 0.041667, dy = 0.041667)
+# dx = 0.041667, dy = 0.041667
+blank = st_as_stars(st_bbox(b), dx = 0.083333, dy = 0.083333)
 blank[[1]][] = NA
 
+# warp: convert from one raster grid to another, preserve the dats type you start with
 # reprojecting, clipping, and resampling rasters to new extent and cell size
 # use bilinear for drought to average continuous population exposure values (resampling?)
 # (object, destination, logical operator, usable b/c of GDAL)
@@ -401,7 +404,7 @@ lhz_stats
   # creating mask layer
   mask = ta_capacity_r
   mask[mask > 0] = 1
-  mask[mask == 0] = NA
+  mask[mask == 0] = NA # one with zero should not be included
   
   # masking flood and drought 
   #reclassify drought & flood already has classification
@@ -502,8 +505,8 @@ map_2010
 ```
 
 ```{r find break & limit values for vulnerability map}
-vuln_max <- max(ta_r[[1]],na.rm = TRUE)
-vuln_min <- min(ta_r[[1]],na.rm = TRUE)
+vuln_max <- max(final[[1]],na.rm = TRUE)
+vuln_min <- min(final[[1]],na.rm = TRUE)
 ``` 
 
 ```{r vulnerability map}
@@ -520,7 +523,7 @@ vuln_map = ggplot() +
   geom_sf(data = ea,
           fill = clrs,
           color = NA) +
-  geom_stars(data = ta_r) +
+  geom_stars(data = final) +
   scale_fill_gradient(
     low = "#FFFF75",
     high = "#CF4611",
@@ -633,15 +636,15 @@ orfig5rast = orfig5rast %>%
 )  # or is Re-scaled from 0 to 1 with (value - min)/(max - min)
 # it is also inverted, because higher blue values are less red
 
-ta_r = ta_r %>% 
+final = final %>% 
   mutate(rp =
-           (vuln - min(ta_r[[1]], na.rm= TRUE)) /
-           (max(ta_r[[1]], na.rm= TRUE) -
-            min(ta_r[[1]], na.rm= TRUE)
+           (capacity_2010 - min(final[[1]], na.rm= TRUE)) /
+           (max(final[[1]], na.rm= TRUE) -
+            min(final[[1]], na.rm= TRUE)
         )
 )  # rp is Re-scaled from 0 to 1 with (value - min)/(max - min)
 
-fig5comp = c( select(ta_r,"rp"), select(orfig5rast,"or"))
+fig5comp = c(select(final,"rp"), select(orfig5rast,"or"))
 # combine the original (or) fig 5 and reproduced (rp) fig 5
 
 fig5comp = fig5comp %>% mutate( diff = rp - or )
