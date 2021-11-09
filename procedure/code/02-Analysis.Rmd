@@ -13,9 +13,10 @@ output: html_document
 ### [https://gis4dev.github.io/](https://gis4dev.github.io/)
 
 
-```{r libraries, include = F}
-packages = c("downloader", "haven", "stars", "dplyr", "sf", "rdhs", "classInt", "readr", "ggplot2", "here", "s2", "pastecs", "cartography")
-setdiff(packages, rownames(installed.packages()))
+```{r install packages and load libraries, include = F}
+packages = c("downloader", "haven", "stars", "dplyr", "sf", "rdhs", "classInt",
+             "readr", "ggplot2", "here", "s2", "pastecs", "cartography")
+
 install.packages(setdiff(packages, rownames(installed.packages())), quietly=TRUE)
 
 library(downloader)
@@ -32,81 +33,111 @@ library(s2)
 library(pastecs)
 library(cartography)
 
-sf_use_s2(T)
+sf_use_s2(TRUE)
 ```
 
-```{r formatting package versions}
-# list of required packages
-packages = c("here")
+```{r save R processing environment}
 
-# load and install required packages
-package.check <- lapply(
-  packages,
-  FUN = function(x) {
-    if (!require(x, character.only = TRUE)) {
-      install.packages(x, dependencies = TRUE)
-      library(x, character.only = TRUE)
-    }
-  }
-)
-
-# save the R processing environment 
-writeLines(capture.output(sessionInfo()),here("procedure","environment","r_environment.txt"))
-
-# read in R processing environment
-# the data frame package_version provides info on the libraries used for this analysis when previewed in the console
-package_version <- read.delim(here("procedure","environment","r_environment.txt"))
+# save the R processing environment, including date in file name
+env <- here("procedure", "environment")
+if (!file.exists(here(env, "r_environment.txt"))) {
+  writeLines(
+    capture.output(sessionInfo()), here(env, "r_environment.txt")
+  )
+} else {writeLines(
+    capture.output(sessionInfo()),
+    here(env, paste0("r-environment-", Sys.Date(), ".txt"))
+  )
+}
 ```
 
-```{r create values to access private and public raw data more efficiently}
-private_r = here("data","raw","private")
-public_r = here("data","raw","public")
+
+```{r define raw data paths}
+private_r <- here("data","raw","private")
+public_r <- here("data","raw","public")
 ```
 
-```{r reading all data used for analysis, message=FALSE}
-ta_gref = read_sf(here("data", "derived", "public", "ta_fig4_v.gpkg"), layer = "ta_fig4_v") %>% 
+
+```{r load data used for analysis, message=FALSE}
+ta_gref <- read_sf(here("data", "derived", "public", "ta_fig4_v.gpkg"), layer = "ta_fig4_v") %>% 
   st_make_valid()
 # This read may need to be changed to match the final output of 01-preanalysis!
 # which was: st_write(ta_v, here("data", "derived", "public", "ta_v.gpkg"), append=FALSE)
 
-dr = read_stars(here(public_r, "dr1010ipeykx.tif")) %>% 
+dr <- read_stars(here(public_r, "dr1010ipeykx.tif")) %>% 
   st_set_crs(4326) 
 
-fl = read_stars(here(public_r,  "fl1010irmt.tif")) %>% 
+fl <- read_stars(here(public_r,  "fl1010irmt.tif")) %>% 
   st_set_crs(4326) 
 
-lhz_v = read_sf(here(public_r, "MW_LHZ_2009.shp")) %>% 
+lhz_v <- read_sf(here(public_r, "MW_LHZ_2009.shp")) %>% 
   st_make_valid()
 
-lhz_t = read.csv(here(public_r, "lhz.csv"))
+lhz_t <- read.csv(here(public_r, "lhz.csv"))
 
-ta = read_sf(here(public_r, "MWI_adm2.shp")) %>%
+ta <- read_sf(here(public_r, "MWI_adm2.shp")) %>%
   st_make_valid() 
 
-lakes = st_as_sf(read_csv(here(public_r, "major_lakes.csv"))[, c("name", "the_geom")],
-                 wkt = "the_geom",
-                 crs = 4326) %>%
+lakes <- read_csv(here(public_r, "major_lakes.csv")) %>% 
+  select("name", "the_geom") %>% 
+  st_as_sf(wkt = "the_geom", crs = 4326) %>%
   st_geometry %>%
   st_union %>%
   st_sf %>%
   mutate(EA = "Major Lakes of Malawi")
 ```
 
-```{r reading 2010 adaptive capacity data}
-dhsclusters_2010 = readRDS(here(private_r, "datasets", "MWGE62FL.rds")) %>%
-  as("sf") %>% 
-  st_transform(3395) %>% 
-  # joining id for traditional authorities and livelihood zones to dhs clusters
-  st_join(st_transform(select(ta_gref, ID_2),3395)) %>% 
-  #st_join(st_transform(select(lhz_v, FNID),3395)) %>% 
-  rename(ta_id = ID_2,
-         #lhz_id = FNID,
-         urban_rural = URBAN_RURA)
-
-dhshh_2010 = readRDS(here(private_r, "datasets", "MWHR61SV.rds")) %>% zap_labels()
+```{r load adaptive capacity data}
+dhsclusters_2010 <- readRDS(here(private_r, "datasets", "MWGE62FL.rds")) %>%
+  as("sf") 
+  
+dhshh_2010 <- readRDS(here(private_r, "datasets", "MWHR61SV.rds")) %>% 
+  zap_labels()
 ```
 
+
+```{r join traditional authority and cluster data to households}
+# spatial join traditional authority ID to clusters
+cluster_ta <- dhsclusters_2010 %>% 
+  st_join(ta_gref) %>% 
+  st_drop_geometry() %>% 
+  select(DHSCLUST, ta_id = ID_2, urban_rural = URBAN_RURA)
+
+# join traditional authority and urban/rural data to DHS surveys
+# select variables for adaptive capacity analysis
+dhshh_2010 <- dhshh_2010 %>%
+  left_join(cluster_ta, by = c("HV001" = "DHSCLUST")) %>% 
+  select(HHID,
+         HV001,
+         HV002,
+         ta_id,
+         urban_rural,
+         HV246A,
+         HV246D,
+         HV246E,
+         HV246G,
+         HV248,
+         HV245,
+         HV271,
+         HV251,
+         HV204,
+         HV206,
+         HV226,
+         HV219,
+         HV243A,
+         HV207)
+
+paste(sum(is.na(cluster_ta$ta_id)),
+      "clusters did not join to a Traditional Authority, affecting",
+      sum(is.na(dhshh_2010$ta_id)),
+      "household surveys")
+
+```
+
+
 ```{r households to remove}
+# create list of households with inconclusive data for adaptive capacity 
+# that is, the household gave a "do not know" answer to a question
 rmv_2010 = dhshh_2010 %>%  
   filter(
   HV246A == 98 |
@@ -126,134 +157,125 @@ rmv_2010 = dhshh_2010 %>%
     HV226  == 99 |
     HV226  == 95 |
     HV226  == 96 |
-    HV207  ==  9 
-) %>% 
-  pull(HHID)
+    HV207  ==  9 |
+    (is.na(HV246A) & is.na(HV246D) & is.na(HV246E) & is.na(HV246G))) 
+paste(nrow(rmv_2010), "household surveys with inconclusive attribute data")
+
 ```
 
+
+```{r remove missing data}
+
+paste(nrow(dhshh_2010), "household surveys")
+# count missing ta_id's
+hh_capacity_t <- dhshh_2010 %>%
+  anti_join(rmv_2010, by = "HHID") %>% # 24638 records
+  filter(!is.na(ta_id)) # 23543 records
+paste(nrow(hh_capacity_t), "household surveys with complete data")
+paste(nrow(dhshh_2010)-nrow(hh_capacity_t), "surveys removed for missing data")
+
+```
+
+
 ```{r capacity in households 2010}
-hh_capacity_t = dhshh_2010 %>%
-  # joining traditional authority ids and urban_rural column 
-  left_join(st_drop_geometry(select(dhsclusters_2010, DHSCLUST, ta_id, urban_rural)), by = c("HV001" = "DHSCLUST")) %>%
-  select(
-    HHID,
-    HV001,
-    HV002,
-    ta_id,
-    urban_rural,
-    HV246A,
-    HV246D,
-    HV246E,
-    HV246G,
-    HV248,
-    HV245,
-    HV271,
-    HV251,
-    HV204,
-    HV206,
-    HV226,
-    HV219,
-    HV243A,
-    HV207
-    #24825 features
-  ) %>%
-  # removing values based on index and where there are NAs 
-  filter(!HHID %in% rmv_2010) %>% 
-  filter(!is.na(ta_id)) %>% 
-  # 23544 features of 19 variables 
-  # removing any surveys where all livestock values were NA
-  filter(!(is.na(HV246A) & is.na(HV246D) & is.na(HV246E)  & is.na(HV246G) )) %>% 
-  # 23543 features of 19 variables 
-  # using rowwise() to find sum of livestock by household --> go through every row of table
-  # and calulate something for each one
-  rowwise %>%
+
+hh_capacity_t <- hh_capacity_t %>%
+  rowwise() %>%
   mutate(hhlivestock = sum(HV246A, HV246D, HV246E, HV246G, na.rm = T)) %>%
-  # when using aggregate functions, rowwise()c create a group for every row, must ungroup now
-  ungroup %>% 
-  # using percent_rank(), those  
-  # in cases where desc() is used, having a greater value before ranked makes a household more vulnerable 
+  ungroup() %>% 
   mutate(
     livestock = percent_rank(hhlivestock) * 4,
     sick = percent_rank(desc(HV248)) * 4,
     land = percent_rank(HV245) * 4,
     wealth = percent_rank(HV271) * 4,
     orphans = percent_rank(desc(HV251)) * 4,
-    # changing 996 to 0 as it takes no time to get water on premises
+    
     # femalehh male = 1, female = 2, run 0 to 1.128 is the binary
-    HV204 = ifelse(HV204 == 996, 0, HV204), #996 means they have source of water in proximity to home
+    
+    HV204 = ifelse(HV204 == 996, 0, HV204), #change 996(water on premise) to 0
     water = percent_rank(desc(HV204)) * 4,
     electricity = percent_rank(HV206) * 4,
     cooking = percent_rank(desc(HV226)) * 4,
-    femalehh = percent_rank(desc(HV219)) * 4,
+    femalehh = percent_rank(desc(HV219)) * 4, # male = 1 and female = 2
     cellphone = percent_rank(desc(HV243A)) * 4,
     radio = percent_rank(HV207) * 4,
-    urbanruralscore = ifelse(urban_rural == "U", 4, 0)
+    urban_rural = ifelse(urban_rural == "U", 1, 0),
+    urbanruralscore = percent_rank(urban_rural) * 4)
+
     # percent_rank sets values 0 to 1, then * 4 puts everything on a 0-4 scale
-  ) 
+    # default is ascending order, with lower values being more vulnerable
+    # desc() option inverts order, with higher values being more vulnerable
+ 
 ```
 
 ```{r capacity for traditional authorities 2010 at the household level}
-hh_capacity_t <- hh_capacity_t %>%
-  # calculating capacity scores based on Table 2 in Malcomb et al (2014)
-  rowwise %>%
-  mutate(
-    capacity = sum(
-      livestock * 0.04,
-      sick * 0.03,
-      land * 0.06,
-      wealth * 0.04,
-      orphans * 0.03,
-      water * 0.04,
-      electricity * 0.03,
-      cooking * 0.02,
-      femalehh * 0.02,
-      cellphone * 0.04,
-      radio * 0.03,
-      urbanruralscore * 0.02),
-      # NAs are not removed here to filter out incomplete surveys later on
-      # multiple by ratio that adds everything to 40% of 5 --> max is going to be 2, 2*20 = 40%
-      # values have possible range of 0 to 1.6, 0.071 to 1.054 when adjusted range of 0-4
-      na.rm = F)
-      # 23543 features of 34 variables 
+# calculating capacity scores based on Table 2 in Malcomb et al (2014)
+hh_capacity_t <- mutate(hh_capacity_t, 
+                        capacity = 
+                        0.04 * livestock +
+                        0.03 * sick +
+                        0.06 * land +
+                        0.04 * wealth +
+                        0.03 * orphans +
+                        0.04 * water +
+                        0.03 * electricity +
+                        0.02 * cooking +
+                        0.02 * femalehh +
+                        0.04 * cellphone +
+                        0.03 * radio +
+                        0.02 * urbanruralscore
+                        )
+ 
 ```
 
-``` {r summary stats for tas at hh level before pullings nas}
+``` {r summary stats for TAs at household level before pullings nas}
 hh_stats <- stat.desc(hh_capacity_t[,21:33]) %>%
   mutate_if(is.numeric, round, digits=1)
 hh_stats
 ```
 
-```{r extract traditional authorities without data}
-hh_null <- hh_capacity_t[is.na(hh_capacity_t$capacity),] 
+```{r households with incomplete capacity data}
 
-st_write(hh_null, here("data", "derived", "public", "hh_null.csv"), append=FALSE)
-# 3981 features
+hh_null <- filter(hh_capacity_t, is.na(capacity))
+paste(nrow(hh_null), "household surveys with null data")
+hh_null_stats <- stat.desc(hh_null[,21:32]) %>%
+  mutate_if(is.numeric, round, digits=1)
+hh_null_stats
+
 ```
 
-```{r remove nulls}
+```{r remove incomplete households}
 hh_capacity_t <- hh_capacity_t %>%
-filter(!is.na(capacity)) %>% # removing incomplete surveys 
-ungroup
-#19562 features (from the initial 23543 --> removed 3981 NA features)
+  
+filter(!is.na(capacity)) 
+paste(nrow(hh_capacity_t), "household surveys with complete adaptive capacity")
+
 ```
 
-``` {r summary stats for tas at hh level after pullings nas}
+
+``` {r summary statistics for household adaptive capacity}
+
 hh_capacity_stats <- stat.desc(hh_capacity_t[,21:33]) %>%
   mutate_if(is.numeric, round, digits=1)
 hh_capacity_stats
+paste(nrow(ta_capacity_t),
+      "traditional authorities with adaptive capacity data")
 ```
 
-```{r capacity for traditional authorities 2010; aggregates from household level}
-  ta_capacity_t <- hh_capacity_t %>% 
+```{r aggregate adaptive capacity to traditional authorities}
+
+ta_capacity_t <- hh_capacity_t %>% 
   group_by(ta_id) %>%
   summarize(
     capacity_avg = mean(capacity),
     capacity_min = min(capacity),
     capacity_max = max(capacity),
-    capacity_sd = sd(capacity)
-  )
-#214 features
+    capacity_sd = sd(capacity))
+
+ta_capacity_t
+
 ```
+
 
 ```{r joining 2010 capacity to ta and creating breaks for visualization}
 # join mean capacity to traditional authorities
@@ -263,9 +285,11 @@ ta_v = left_join(
   by = c("ID_2" = "ta_id")
 )
 
-# making capacity score resemble malcomb et al's work 
+# indicators ranged 0-4 and were multiplied by weights totaling 0.4
+# yielding maximum theoretical score of 1.6; therefore multiply by 25
+# which achieves a maximum score of 40
 ta_v = mutate(ta_v, capacity_2010 = capacity_2010 * 25)
-# 234 features 
+
 
 # preparing breaks for mapping using natural jenks method
 ta_brks = filter(ta_v, !is.na(capacity_2010)) %>% {classIntervals(.$capacity_2010, 4, style = "jenks")$brks}
@@ -280,11 +304,16 @@ ta_v = mutate(ta_v, capacity_2010_brks = case_when(
 ))
 ```
 
+
+
 ```{r extract traditional authorities without data by capacity, warning=FALSE}
 ta_null_cap <- ta_v[is.na(ta_v$capacity_2010),]
 #20 features
 
-st_write(ta_null_cap, here("data", "derived", "public", "ta_null_capacity.shp"), append=FALSE)
+st_write(ta_null_cap, 
+         here("data", "derived", "public", "ta_null_capacity.shp"), 
+         append=FALSE,
+         quiet = TRUE)
 ```
 
 ```{r saving adaptive capacity scores}
@@ -294,11 +323,15 @@ save(
 )
 ```
 
+
 ```{r check final ta_v output before mapping}
 ta_v_check <- ggplot() + 
-  geom_sf(data = ta_v,
-          aes(fill = capacity_2010), size = .1, color = "grey98") + 
-          scale_fill_continuous(name = "Adaptive Capacity Scores", low="lemonchiffon1", high="lightcoral", na.value = "snow3") 
+  geom_sf(data = ta_v, aes(fill = capacity_2010), size = .1, color = "grey98") + 
+  scale_fill_continuous(
+    name = "Adaptive\nCapacity\nScores", 
+    low="lemonchiffon1", 
+    high="lightcoral", 
+    na.value = "snow3") 
 ta_v_check 
 ```
 
@@ -318,13 +351,13 @@ b = st_bbox(
   st_as_sfc()
 
 # where raster = 1, you have flood visualized
-# dx = 0.041667, dy = 0.041667
-blank = st_as_stars(st_bbox(b), dx = 0.083333, dy = 0.083333)
+# alternative resolution: 0.083333
+blank = st_as_stars(st_bbox(b), dx = 0.041667, dy = 0.041667)
 blank[[1]][] = NA
 
 # warp: convert from one raster grid to another, preserve the dats type you start with
 # reprojecting, clipping, and resampling rasters to new extent and cell size
-# use bilinear for drought to average continuous population exposure values (resampling?)
+# use bilinear for drought to average continuous population exposure values 
 # (object, destination, logical operator, usable b/c of GDAL)
 dr = st_warp(dr, blank, use_gdal = T, method = "bilinear")
 # use nearest neighbor for flood risk to preserve integer values
@@ -355,41 +388,47 @@ ta_capacity_v = st_clip(st_transform(filter(ta_v, is.na(capacity_2010) == F), 33
 ta_capacity_r = st_rasterize(ta_capacity_v[, 'capacity_2010'], blank)
 ```
 
-```{R processing + weighting FEWSNet Data}
+
+```{R calculate livelihood sensitivity}
 # LHZ Data
 lhz_sensitivity_v  = lhz_v %>%
   inner_join(lhz_t, by = ("LZCODE" = "LZCODE")) %>%
-  # calculate scores for LHZ weighted indicators by metatheme (as seen in Table 2)
   mutate(
-  pctOwnCrop = (sof_crop + sof_livestock) * 100, 
-  pctIncWage = (soc_labour / soc_total) * 100,
-  pctIncCashCrops = (cp_tobacco + cp_sugar + cp_tea + cp_coffee) / soc_total * 100,
-  disasterCoping = (se_firewoord + se_grass	+ se_wildfood + se_charcoal + se_matmaking + se_basket) / soc_total * 100,
+    pctOwnCrop = (sof_crop + sof_livestock) * 100, 
+    pctIncWage = (soc_labour / soc_total) * 100,
+    pctIncCashCrops = (cp_tobacco + cp_sugar + cp_tea + cp_coffee) / soc_total 
+      * 100,
+    pctDisasterCope = (se_firewoord + se_grass	+ se_wildfood + se_charcoal + 
+      se_matmaking + se_basket) / soc_total * 100
   ) %>%
-  # multiply metatheme values by 4 readjust range
+  
   mutate(
-  ownCrop = percent_rank(pctOwnCrop) * 4, # high values means lower sensitivity 
-  wageIncome = percent_rank(pctIncWage) * 4, # high values means lower sensitivity
-  cashCropIncome = percent_rank(desc(pctIncCashCrops)) * 4, #high values mean lower sensitivity (b/c of desc)
-  newDisaster = percent_rank(desc(disasterCoping)) * 4, #high values mean lower sensitivity (b/c of desc)
+  ownCrop = percent_rank(pctOwnCrop) * 4, 
+  # high ownCrop percentages indicate low sensitivity 
+  wageIncome = percent_rank(pctIncWage) * 4, 
+  # high wage percentages indicate low sensitivity
+  cashCropIncome = percent_rank(desc(pctIncCashCrops)) * 4, 
+  # high cash crop percentages indicate high sensitivity (market exposure)
+  newDisaster = percent_rank(desc(pctDisasterCope)) * 4, 
+  # high disaster coping strategy percentages indicate high sensitivity 
   ) %>%
-  rowwise %>%
   mutate(
-    livelihoodSensitivity_new = sum(
-      ownCrop * 6,
-      wageIncome * 6,
-      cashCropIncome * 4,
-      newDisaster * 4) 
-  ) %>% ungroup
-# livelihood sensitivity range is now 23.529 to 56.000
+    sensitivity = (
+      0.06 * ownCrop +
+      0.06 * wageIncome +
+      0.04 * cashCropIncome +
+      0.04 * newDisaster
+      ) * 25
+  )  
+# livelihood sensitivity range is 5.88 to 14.00
 # making capacity rasters 
 
-lhz_sensitivity_r = st_rasterize(lhz_sensitivity_v[,'livelihoodSensitivity_new'], blank)
+lhz_sensitivity_r = st_rasterize(lhz_sensitivity_v[,'sensitivity'], blank)
 
 lhz_v_check <- ggplot() + 
   geom_sf(data = lhz_sensitivity_v, 
-          aes(fill = livelihoodSensitivity_new), size = .2, color = "grey4") +
-  scale_fill_continuous(name = "Livelihood Sensitivity Scores", low="lemonchiffon1", high="lightcoral")
+          aes(fill = sensitivity), size = .2, color = "grey98") +
+  scale_fill_continuous(name = "Livelihood\nSensitivity\nScores", low="lemonchiffon1", high="lightcoral")
 lhz_v_check
 ```
 
@@ -432,6 +471,7 @@ lhz_stats
   final = 100 - (ta_capacity_r + lhz_sensitivity_r + (40 - (drought + flood))) # 100 = highest vulnerability, 0 = lowest vulnerability
 ```
 
+
 ```{r descriptive stats for raster inputs}
 fl_stats <- stat.desc(fl)
 dr_stats <- stat.desc(dr)
@@ -449,11 +489,15 @@ ta_r = ta_capacity_v[!is.na(ta_capacity_v$vuln), "vuln"]
 ta_r = st_rasterize(ta_r[1])
 ```
 
+
 ```{r extract traditional authorities without data by vuln, warning=FALSE}
 ta_null <- ta_capacity_v[is.na(ta_capacity_v$vuln),]
 #20 features
 
-st_write(ta_null, here("data", "derived", "public", "ta_null.shp"), append=FALSE)
+st_write(ta_null, 
+         here("data", "derived", "public", "ta_null.shp"), 
+         append=FALSE,
+         quiet = TRUE)
 ```
 
 ```{r misc. map features}
@@ -474,6 +518,16 @@ ea = lhz_v %>%
 ```
 
 ```{r 2010 adaptive capacity map}
+# create map legend, starting with natural breaks intervals created earlier
+map_2010legend <- c("#333333","#666666","#999999","#CCCCCC")  
+names(map_2010legend) <- ta_int 
+map_2010legend <- append(map_2010legend, c(
+    "Missing Data" = "#FFC389",
+    "National Parks and Reserves" = "#D9EABB",
+    "Major Lakes of Malawi" = "lightblue"
+  ))
+
+# create the map
 map_2010 = ggplot() +
   geom_sf(data = ea,
           aes(fill = EA),
@@ -482,22 +536,10 @@ map_2010 = ggplot() +
     data = ta_capacity_v,
     aes(fill = capacity_2010_brks),
     color = "white",
-    lwd = .2
-  ) + scale_fill_manual(
-    # unique(ta_capacity_v$capacity_2010_brks) allows you to check breaks
-    # map will not load unless breaks are exact
-    values = list(
-      "Missing Data" = "#FFC389",
-      "National Parks and Reserves" = "#D9EABB",
-      "Major Lakes of Malawi" = "lightblue",
-      "7.43 - 9.82" = "#333333",
-      "9.82 - 11.39" = "#666666",
-      "11.39 - 13.6" = "#999999",
-      "13.6 - 16.68" = "#CCCCCC"
-    )
-  ) +
+    lwd = .2) + 
+  scale_fill_manual(values = map_2010legend) +
   scale_x_continuous(breaks = c(33,34,35,36)) +
-  labs(title = "Adaptive Capacity Scores Based on 2010 DHS Surveys in 222 Traditional Authorities") +
+  labs(title = "Adaptive Capacity Scores of\n222 Traditional Authorities in 2010") +
   theme_minimal() +
   theme(legend.title = element_blank())
 
@@ -589,7 +631,7 @@ rp_fig4 = ta_capacity_v %>% # prepare our reproduction of figure 4 data
   select(c(ID_2,capacity_2010)) %>%  
   # select only the ID_2 and resilience columns
   # note: geometry columns are 'sticky' -- only way to remove is st_drop_geometry()
-  na.omit()  %>%
+  na.omit() %>%
   # remove records with null values
   mutate(rp_ac = case_when(
   capacity_2010 <= ta_brks[2] ~ 1,
@@ -623,7 +665,7 @@ orfig5vect =
   mutate(bg_mean = bmean + gmean)
 # load original georeferenced figure 5 data
 
-orfig5rast = st_rasterize(orfig5vect["bg_mean"], template=ta_r)
+orfig5rast = st_rasterize(orfig5vect["bg_mean"], template=blank)
 # convert mean of blue and green values into a raster using ta_final as a reference for raster
 # extent, cell size, CRS, etc.
 
@@ -644,7 +686,7 @@ final = final %>%
         )
 )  # rp is Re-scaled from 0 to 1 with (value - min)/(max - min)
 
-fig5comp = c(select(final,"rp"), select(orfig5rast,"or"))
+fig5comp = c( select(final,"rp"), select(orfig5rast,"or"))
 # combine the original (or) fig 5 and reproduced (rp) fig 5
 
 fig5comp = fig5comp %>% mutate( diff = rp - or )

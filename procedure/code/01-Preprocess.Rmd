@@ -21,11 +21,13 @@ library(downloader)
 library(haven)
 library(sf)
 library(dplyr)
+library(rdhs)
 library(here)
 library(readr)
 library(ggplot2)
 library(s2)
-sf_use_s2(T)
+
+sf_use_s2(TRUE)
 ```
 
 ```{r formatting package versions}
@@ -143,9 +145,23 @@ st_write(ta_v, here("data", "derived", "public", "ta_v.gpkg"), append=FALSE)
 ```
 Once ta_v.gpkg is exported, this geopackage was opened in QGIS. These geometries are what you want to use for analysis, as they exclude nature features (forests, reserves, and lakes) and error features (nature features that included household points, thus receiving a capacity score when they shouldn't have). 
 
-These error features were found by pulling in the MWI_adm shapefile (TAs) and MWGE62FL shapefile (DHS Household Survey Cluster points), then using the count points in polygon tool to find which traditional authorities did and didn't contain household points. The workflow for this troubleshooting process can be found [here](https://github.com/daptx/RP-Malcomb/issues/6). Ultimately, this source of error was the reason behind this first notebook, to fix the traditional authority geometries before attempting to replicate the original results of Malcomb et al (2014).
 
-With the new traditional authorities vectors (234 features) in QGIS, a georeferenced shapefile of the figure 4 from Malcomb et al (2014), the adaptive capacity map, was converted into a .csv, then joined to the traditional authorities derived from this code by ID_2 (the column feature used to distinguish TAs). The custom prefix gref_ was used. Once created, a field calculator was used to create a 'capacity' column, turning the gref_resilience scores into integers and fixing the naming syntax for the remainder of analysis. In Malcomb et al (2014), capacity and resilience were terms used loosely and interchangably, making it essential to follow one naming schema in this analysis: capacity/capacity scores. After, this final shape file of 234 features and 23 variables (geometry included) was exported as ta_fig4_v.gpkg and is brought in at the start of the RP-Malcomb-jh.Rmb notebook.
+
+These error features were found by pulling in the MWI_adm shapefile (TAs) and MWGE62FL shapefile (DHS Household Survey Cluster points), then using the count points in polygon tool to find which traditional authorities did and didn't contain household points. 
+
+The workflow for this troubleshooting process can be found [here](https://github.com/daptx/RP-Malcomb/issues/6). 
+
+Ultimately, this source of error was the reason behind this first notebook, to fix the traditional authority geometries before attempting to replicate the original results of Malcomb et al (2014).
+
+
+
+With the new traditional authorities vectors (234 features) in QGIS, a georeferenced shapefile of the figure 4 from Malcomb et al (2014), the adaptive capacity map, was converted into a .csv, then joined to the traditional authorities derived from this code by ID_2 (the column feature used to distinguish TAs). 
+
+The custom prefix gref_ was used. Once created, a field calculator was used to create a 'capacity' column, turning the gref_resilience scores into integers and fixing the naming syntax for the remainder of analysis. 
+
+In Malcomb et al (2014), capacity and resilience were terms used loosely and interchangably, making it essential to follow one naming schema in this analysis: capacity/capacity scores. 
+
+After, this final shape file of 234 features and 23 variables (geometry included) was exported as ta_fig4_v.gpkg and is brought in at the start of the RP-Malcomb-jh.Rmb notebook.
 
 The original figures from Malcomb et al (2014) were 'cloned' using the follow steps: 
 1. Save a digital map image
